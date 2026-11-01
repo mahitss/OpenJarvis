@@ -78,6 +78,14 @@ def _read_input(prompt: str = "You> ") -> Optional[str]:
     default=False,
     help="Enable voice I/O: mic input with silence detection + TTS response playback.",
 )
+@click.option(
+    "--continuous",
+    "--hands-free",
+    "continuous_voice",
+    is_flag=True,
+    default=False,
+    help="Continuous hands-free conversation loop: automatically listens when Jarvis finishes speaking.",
+)
 @runtime_cli_options
 def chat(
     engine_key: str | None,
@@ -88,9 +96,10 @@ def chat(
     system_prompt: str | None,
     persona_name: str | None,
     voice_mode: bool,
-    num_ctx: int | None,
-    num_gpu: int | None,
-    skip_runtime_panel: bool,
+    continuous_voice: bool = False,
+    num_ctx: int | None = None,
+    num_gpu: int | None = None,
+    skip_runtime_panel: bool = False,
 ) -> None:
     """Start an interactive multi-turn chat session.
 
@@ -111,6 +120,9 @@ def chat(
     read back via text-to-speech (kokoro local or OpenAI TTS).
     """
     console = Console(stderr=True)
+
+    if continuous_voice:
+        voice_mode = True
 
     config = load_config()
     bus = EventBus(record_history=False)
@@ -297,10 +309,14 @@ def chat(
 
     # Print banner
     voice_hint = (
-        "  [magenta]Voice mode ON[/magenta] — type normally, or press Enter "
-        "to speak; silence stops recording.\n"
-        if voice_mode
-        else ""
+        "  [magenta]Hands-Free Voice Mode ON[/magenta] — Jarvis is listening continuously. Speak naturally!\n"
+        if (voice_mode and continuous_voice)
+        else (
+            "  [magenta]Voice mode ON[/magenta] — type normally, or press Enter "
+            "to speak; silence stops recording.\n"
+            if voice_mode
+            else ""
+        )
     )
     console.print(
         f"[green bold]OpenJarvis Chat[/green bold]\n"
@@ -362,6 +378,13 @@ def chat(
     if system_prompt:
         history.append(Message(role=Role.SYSTEM, content=system_prompt))
 
+    if continuous_voice and voice_session is not None:
+        speak(
+            "Good day, sir. Systems are online and I am listening. How can I assist you?",
+            console,
+            voice_session,
+        )
+
     # REPL loop
     while True:
         for note in _notifications.diff(get_status()):
@@ -369,8 +392,12 @@ def chat(
 
         if voice_mode:
             assert voice_session is not None
-            result = read_voice_input(console, voice_session)
+            result = read_voice_input(
+                console, voice_session, continuous=continuous_voice
+            )
             if result is VOICE_EXIT:
+                if continuous_voice:
+                    speak("Goodbye, sir. Have a wonderful day.", console, voice_session)
                 console.print("\n[dim]Goodbye![/dim]")
                 break
             if result is None:
@@ -517,4 +544,63 @@ def chat(
         memory_service.stop()
 
 
-__all__ = ["chat"]
+@click.command()
+@click.option("-e", "--engine", "engine_key", default=None, help="Engine backend.")
+@click.option(
+    "-m",
+    "--model",
+    "model_name",
+    default=None,
+    help="Model id.",
+)
+@click.option(
+    "--pick-model",
+    "pick_model",
+    is_flag=True,
+    default=False,
+    help="Show model list before voice chat.",
+)
+@click.option("-a", "--agent", "agent_name", default=None, help="Agent type.")
+@click.option("--tools", default=None, help="Comma-separated tool names.")
+@click.option("--system", "system_prompt", default=None, help="Custom system prompt.")
+@click.option(
+    "--persona",
+    "persona_name",
+    default=None,
+    help="Named persona dir under ~/.openjarvis/personas/<name>/.",
+)
+@runtime_cli_options
+@click.pass_context
+def voice(
+    ctx: click.Context,
+    engine_key: str | None,
+    model_name: str | None,
+    pick_model: bool,
+    agent_name: str | None,
+    tools: str | None,
+    system_prompt: str | None,
+    persona_name: str | None,
+    num_ctx: int | None,
+    num_gpu: int | None,
+    skip_runtime_panel: bool,
+) -> None:
+    """Start hands-free real-time conversational voice interaction with Jarvis."""
+    ctx.invoke(
+        chat,
+        engine_key=engine_key,
+        model_name=model_name,
+        pick_model=pick_model,
+        agent_name=agent_name,
+        tools=tools,
+        system_prompt=system_prompt,
+        persona_name=persona_name,
+        voice_mode=True,
+        continuous_voice=True,
+        num_ctx=num_ctx,
+        num_gpu=num_gpu,
+        skip_runtime_panel=skip_runtime_panel,
+    )
+
+
+__all__ = ["chat", "voice"]
+
