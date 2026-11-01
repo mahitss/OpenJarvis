@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Optional
 
 from rich.markup import escape
@@ -33,6 +34,31 @@ def _terminal_safe_text(value: object) -> str:
         char for char in str(value) if char in ("\n", "\t") or char.isprintable()
     )
     return escape(printable)
+
+
+def _clean_text_for_speech(text: str) -> str:
+    """Strip markdown formatting, URLs, code blocks, etc. for natural spoken output."""
+    # Remove markdown code blocks
+    cleaned = re.sub(r"```[\s\S]*?```", " ", text)
+    # Remove inline code backticks
+    cleaned = re.sub(r"`([^`]+)`", r"\1", cleaned)
+    # Remove markdown links [text](url) -> text
+    cleaned = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", cleaned)
+    # Remove markdown image tags ![alt](url) -> ""
+    cleaned = re.sub(r"!\[[^\]]*\]\([^)]+\)", "", cleaned)
+    # Remove markdown headers (#, ##, etc.)
+    cleaned = re.sub(r"^\s*#{1,6}\s*", "", cleaned, flags=re.MULTILINE)
+    # Remove bold and italic markers (* or _)
+    cleaned = re.sub(r"[*_]{1,3}([^*_]+)[*_]{1,3}", r"\1", cleaned)
+    # Remove bullet markers (- , * , + ) at line starts
+    cleaned = re.sub(r"^\s*[-*+]\s+", "", cleaned, flags=re.MULTILINE)
+    # Remove blockquotes
+    cleaned = re.sub(r"^\s*>\s*", "", cleaned, flags=re.MULTILINE)
+    # Remove HTML tags if any
+    cleaned = re.sub(r"<[^>]+>", "", cleaned)
+    # Collapse multiple whitespace
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
 
 
 class VoiceSession:
@@ -87,13 +113,7 @@ class VoiceSession:
         return self._voice_prefs
 
     def voice_for_backend(self, backend: Any, console: Any = None) -> tuple[str, float]:
-        """Return the voice ID valid for ``backend``, plus the configured speed.
-
-        Voice IDs are not portable across backends, so the configured
-        ``speech.voice_id`` is honored only when ``backend`` is the configured
-        ``speech.tts_backend``. Otherwise the fallback backend's own default is
-        used and the substitution is reported once per session.
-        """
+        """Return the voice ID valid for ``backend``, plus the configured speed."""
         want_backend, voice_id, speed = self.get_voice_preferences()
         active = getattr(backend, "backend_id", "") or ""
         if active == want_backend:
@@ -116,8 +136,14 @@ class VoiceSession:
         self._tts_backend = None
 
 
-def read_voice_input(console: Any, session: VoiceSession) -> Optional[str] | object:
-    """Accept a typed command/message, or record after an empty submission."""
+def read_voice_input(
+    console: Any,
+    session: VoiceSession,
+    continuous: bool = False,
+) -> Optional[str] | object:
+    """Accept a typed command/message, or record directly if continuous mode is enabled."""
+    if continuous:
+        return record_voice(console, session, continuous=True)
     try:
         typed = input("You> [type, or press Enter to speak] ")
     except (EOFError, KeyboardInterrupt):
@@ -129,6 +155,7 @@ def read_voice_input(console: Any, session: VoiceSession) -> Optional[str] | obj
 def record_voice(
     console: Any,
     session: VoiceSession | None = None,
+    continuous: bool = False,
 ) -> Optional[str] | object:
     """Record from mic, transcribe, and return text or a loop sentinel."""
     from openjarvis.speech.voice_io import record_until_silence
@@ -144,18 +171,24 @@ def record_voice(
         )
         return VOICE_EXIT
 
-    console.print("[dim cyan]Listening… (speak now, stops on silence)[/dim cyan]")
+    if continuous:
+        console.print("[dim cyan]Listening... (speak naturally, pause to send)[/dim cyan]")
+    else:
+        console.print("[dim cyan]Listening… (speak now, stops on silence)[/dim cyan]")
+
     try:
-        audio_bytes = record_until_silence()
+        audio_bytes = record_until_silence(
+            return_empty_on_silence=continuous,
+            startup_silence_seconds=4.0 if continuous else 5.0,
+        )
     except KeyboardInterrupt:
         return VOICE_EXIT
     except Exception as exc:
-        # PortAudio failures are regular Exceptions (and can surface as
-        # OSError), so report them without letting terminal control sequences
-        # through. SystemExit deliberately continues to propagate, while
-        # Ctrl-C maps to the chat loop's graceful-exit sentinel above.
         console.print(f"[red]Mic error: {_terminal_safe_text(exc)}[/red]")
         return VOICE_EXIT
+
+    if not audio_bytes:
+        return None
 
     console.print("[dim]Transcribing…[/dim]")
     try:
@@ -165,8 +198,24 @@ def record_voice(
         text = result.text.strip()
         if text:
             console.print(f"[bold]You (voice):[/bold] {_terminal_safe_text(text)}")
+            norm = text.lower().rstrip(".!?, ")
+            if norm in (
+                "goodbye",
+                "goodbye jarvis",
+                "bye",
+                "bye jarvis",
+                "exit",
+                "quit",
+                "stop listening",
+                "go to sleep",
+                "sleep mode",
+                "shut down",
+                "sleep",
+            ):
+                return VOICE_EXIT
             return text
-        console.print("[dim]Nothing heard — try again.[/dim]")
+        if not continuous:
+            console.print("[dim]Nothing heard — try again.[/dim]")
         return None
     except Exception as exc:
         console.print(f"[red]Transcription error: {_terminal_safe_text(exc)}[/red]")
@@ -179,12 +228,14 @@ def speak(text: str, console: Any, session: VoiceSession | None = None) -> None:
 
     active_session = session or VoiceSession()
 
-    # Resolved before the loop: a bad config value must surface as a config
-    # error, not be swallowed by the per-backend fallback handler below.
     try:
         active_session.get_voice_preferences()
     except Exception as exc:
         console.print(f"[red]Invalid speech config: {_terminal_safe_text(exc)}[/red]")
+        return
+
+    clean_text = _clean_text_for_speech(text)
+    if not clean_text:
         return
 
     while (backend := active_session.get_tts_backend()) is not None:
@@ -193,7 +244,7 @@ def speak(text: str, console: Any, session: VoiceSession | None = None) -> None:
             synth_kwargs: dict[str, Any] = {"output_format": "wav", "speed": speed}
             if voice_id:
                 synth_kwargs["voice_id"] = voice_id
-            result = backend.synthesize(text, **synth_kwargs)
+            result = backend.synthesize(clean_text, **synth_kwargs)
             if result.audio:
                 play_wav(result.audio, sample_rate=result.sample_rate)
             return

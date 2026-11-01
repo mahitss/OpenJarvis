@@ -8,8 +8,8 @@ import wave
 _SAMPLE_RATE = 16000
 _CHANNELS = 1
 _CHUNK = 1024
-_SILENCE_THRESHOLD = 500  # RMS below this → silence
-_SILENCE_SECONDS = 1.5  # seconds of silence before auto-stop
+_SILENCE_THRESHOLD = 300  # RMS below this → silence
+_SILENCE_SECONDS = 1.3  # seconds of silence before auto-stop
 _STARTUP_SILENCE_SECONDS = 5.0  # give up early if speech never begins
 _MAX_RECORD_SECONDS = 30  # safety ceiling
 
@@ -32,10 +32,12 @@ def record_until_silence(
     silence_seconds: float = _SILENCE_SECONDS,
     startup_silence_seconds: float = _STARTUP_SILENCE_SECONDS,
     max_seconds: float = _MAX_RECORD_SECONDS,
+    return_empty_on_silence: bool = False,
 ) -> bytes:
     """Record from the default microphone until silence is detected.
 
-    Returns raw WAV bytes (16-bit mono).
+    Returns raw WAV bytes (16-bit mono), or empty bytes if return_empty_on_silence is True
+    and no speech was detected.
     Raises RuntimeError if sounddevice is not installed.
     """
     try:
@@ -71,11 +73,16 @@ def record_until_silence(
                 has_speech = True
                 silence_count = 0
             elif not has_speech and len(frames) >= startup_silence_chunks:
+                if return_empty_on_silence:
+                    return b""
                 break
             elif has_speech:
                 silence_count += 1
                 if silence_count >= silence_chunks:
                     break
+
+    if return_empty_on_silence and not has_speech:
+        return b""
 
     return _frames_to_wav(frames, sample_rate)
 
