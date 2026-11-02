@@ -1,9 +1,10 @@
-"""Desktop control tool — launch apps, open URLs, search web, and control Windows."""
+"""Desktop control tool — launch apps, open URLs, search web, control Windows, and take screenshots."""
 
 from __future__ import annotations
 
 import os
 import subprocess
+import time
 import urllib.parse
 import webbrowser
 from pathlib import Path
@@ -16,7 +17,7 @@ from openjarvis.tools._stubs import BaseTool, ToolSpec
 
 @ToolRegistry.register("desktop_control")
 class DesktopControlTool(BaseTool):
-    """Control the Windows laptop: open apps, open websites, search web, and open folders."""
+    """Control the Windows laptop: open apps, open websites, search web, open folders, and capture screen."""
 
     tool_id = "desktop_control"
     is_local = True
@@ -26,26 +27,37 @@ class DesktopControlTool(BaseTool):
         return ToolSpec(
             name="desktop_control",
             description=(
-                "Control the Windows laptop. Actions:\n"
+                "Control the Windows laptop with full access. Actions:\n"
                 "- 'open_url': Open any website URL in the browser.\n"
                 "- 'search_web': Search Google or YouTube directly in the browser.\n"
                 "- 'open_app': Open any application (e.g. chrome, edge, notepad, calc, spotify, code, explorer, settings).\n"
                 "- 'open_folder': Open a folder (downloads, desktop, documents, or custom path) in File Explorer.\n"
-                "- 'system_status': Get current battery, CPU, RAM, and system info."
+                "- 'system_status': Get current battery, CPU, RAM, and system info.\n"
+                "- 'take_screenshot': Capture the current desktop screen.\n"
+                "- 'press_key': Press a key or hotkey combination (e.g. 'enter', 'ctrl+c', 'win')."
             ),
             parameters={
                 "type": "object",
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["open_url", "search_web", "open_app", "open_folder", "system_status"],
+                        "enum": [
+                            "open_url",
+                            "search_web",
+                            "open_app",
+                            "open_folder",
+                            "system_status",
+                            "take_screenshot",
+                            "press_key",
+                        ],
                         "description": "The desktop action to perform.",
                     },
                     "target": {
                         "type": "string",
                         "description": (
                             "Target for the action: URL for 'open_url', search query for 'search_web', "
-                            "app name for 'open_app', or folder name/path for 'open_folder'."
+                            "app name for 'open_app', folder name/path for 'open_folder', "
+                            "or key name for 'press_key'."
                         ),
                     },
                     "search_engine": {
@@ -189,5 +201,41 @@ class DesktopControlTool(BaseTool):
             except Exception:
                 info.append("System status: Operational")
             return ToolResult(tool_name="desktop_control", content="\n".join(info), success=True)
+
+        elif action == "take_screenshot":
+            try:
+                import pyautogui
+                save_dir = Path.home() / "Pictures" / "Jarvis_Screenshots"
+                save_dir.mkdir(parents=True, exist_ok=True)
+                filename = target if target else f"screenshot_{int(time.time())}.png"
+                if not filename.endswith((".png", ".jpg")):
+                    filename += ".png"
+                save_path = save_dir / filename
+                pyautogui.screenshot(str(save_path))
+                return ToolResult(
+                    tool_name="desktop_control",
+                    content=f"Screenshot captured and saved to: {save_path}",
+                    success=True,
+                )
+            except Exception as e:
+                return ToolResult(tool_name="desktop_control", content=f"Failed to capture screenshot: {e}", success=False)
+
+        elif action == "press_key":
+            if not target:
+                return ToolResult(tool_name="desktop_control", content="Error: No key provided.", success=False)
+            try:
+                import pyautogui
+                keys = [k.strip().lower() for k in target.split("+")]
+                if len(keys) > 1:
+                    pyautogui.hotkey(*keys)
+                else:
+                    pyautogui.press(keys[0])
+                return ToolResult(
+                    tool_name="desktop_control",
+                    content=f"Pressed key combination: {target}",
+                    success=True,
+                )
+            except Exception as e:
+                return ToolResult(tool_name="desktop_control", content=f"Failed to press key: {e}", success=False)
 
         return ToolResult(tool_name="desktop_control", content=f"Unknown action: {action}", success=False)
