@@ -5,7 +5,7 @@ Orchestrates the complete JARVIS experience:
 2. Verifies OpenJarvis API server is running on port 8000.
 3. Verifies OpenJarvis Web UI is running on port 5173.
 4. Opens the sleek native App Window on screen.
-5. Starts hands-free voice interaction with full laptop control.
+5. Starts hands-free voice interaction with full laptop control (single-instance).
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent
 VENV_PYTHON = BASE_DIR / ".venv" / "Scripts" / "python.exe"
 VENV_JARVIS = BASE_DIR / ".venv" / "Scripts" / "jarvis.exe"
+VOICE_BAT = BASE_DIR / "jarvis_voice.bat"
 FRONTEND_DIR = BASE_DIR / "frontend"
 EDGE_PATH = Path("C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe")
 
@@ -99,12 +100,42 @@ def open_app_window() -> None:
         webbrowser.open(url)
 
 
+def is_voice_already_running() -> bool:
+    """Check if hands-free voice assistant is already active using Windows Named Mutex."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.CreateMutexW(None, False, "OpenJarvisVoiceAssistantMutex")
+        if kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+            if handle:
+                kernel32.CloseHandle(handle)
+            return True
+        if handle:
+            kernel32.CloseHandle(handle)
+        return False
+    except Exception:
+        return False
+
+
 def run_voice_assistant() -> None:
+    if is_voice_already_running():
+        print("[JARVIS] Hands-Free Voice Assistant is already active and listening.")
+        return
+
     print("[JARVIS] Launching Hands-Free Voice Assistant with Full Laptop Control...")
-    subprocess.run(
-        [str(VENV_JARVIS), "voice", "--full-access"],
-        cwd=str(BASE_DIR),
-    )
+    if sys.platform == "win32" and VOICE_BAT.exists():
+        # Launch in a visible terminal window so user can see transcription and tool feedback
+        subprocess.Popen(
+            ["cmd.exe", "/c", "start", "J.A.R.V.I.S. - Voice Assistant", str(VOICE_BAT)],
+            cwd=str(BASE_DIR),
+        )
+    else:
+        subprocess.run(
+            [str(VENV_JARVIS), "voice", "--full-access"],
+            cwd=str(BASE_DIR),
+        )
 
 
 def main() -> None:

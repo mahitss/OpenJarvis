@@ -613,6 +613,14 @@ def voice(
     skip_runtime_panel: bool,
 ) -> None:
     """Start hands-free real-time conversational voice interaction with Jarvis."""
+    # Retain named mutex on Windows so single-instance launcher knows voice is running
+    _mutex = None
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            _mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "OpenJarvisVoiceAssistantMutex")
+        except Exception:
+            pass
     ctx.invoke(
         chat,
         engine_key=engine_key,
