@@ -44,6 +44,13 @@ def ensure_ollama() -> None:
 
 def ensure_backend() -> None:
     if not is_port_listening("http://127.0.0.1:8000/health"):
+        # Remove any stale server records if port is dead
+        cfg_dir = Path.home() / ".openjarvis"
+        for stale in ["server.pid", "server.json"]:
+            try:
+                (cfg_dir / stale).unlink(missing_ok=True)
+            except Exception:
+                pass
         print("[JARVIS] Starting OpenJarvis API Server (port 8000)...")
         log_file = open(Path.home() / ".openjarvis" / "server.log", "a", encoding="utf-8")
         subprocess.Popen(

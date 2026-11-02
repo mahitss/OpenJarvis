@@ -588,6 +588,14 @@ def chat(
     default=None,
     help="Named persona dir under ~/.openjarvis/personas/<name>/.",
 )
+@click.option(
+    "--auto-approve",
+    "--full-access",
+    "auto_approve",
+    is_flag=True,
+    default=True,
+    help="Auto-approve tool executions without interactive confirmation prompts.",
+)
 @runtime_cli_options
 @click.pass_context
 def voice(
@@ -599,6 +607,7 @@ def voice(
     tools: str | None,
     system_prompt: str | None,
     persona_name: str | None,
+    auto_approve: bool,
     num_ctx: int | None,
     num_gpu: int | None,
     skip_runtime_panel: bool,
@@ -615,7 +624,7 @@ def voice(
         persona_name=persona_name,
         voice_mode=True,
         continuous_voice=True,
-        auto_approve=True,
+        auto_approve=auto_approve,
         num_ctx=num_ctx,
         num_gpu=num_gpu,
         skip_runtime_panel=skip_runtime_panel,
