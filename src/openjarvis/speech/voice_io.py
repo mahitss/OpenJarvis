@@ -8,7 +8,7 @@ import wave
 _SAMPLE_RATE = 16000
 _CHANNELS = 1
 _CHUNK = 1024
-_SILENCE_THRESHOLD = 300  # RMS below this → silence
+_SILENCE_THRESHOLD = 100  # RMS below this → silence
 _SILENCE_SECONDS = 1.3  # seconds of silence before auto-stop
 _STARTUP_SILENCE_SECONDS = 5.0  # give up early if speech never begins
 _MAX_RECORD_SECONDS = 30  # safety ceiling

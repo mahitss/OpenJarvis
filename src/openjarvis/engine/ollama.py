@@ -70,6 +70,16 @@ def _is_control_token_only_args(raw_args: Any) -> bool:
     return saw_token
 
 
+def _is_online(timeout: float = 0.5) -> bool:
+    """Check if internet connectivity is available."""
+    import socket
+    try:
+        socket.create_connection(("1.1.1.1", 53), timeout=timeout).close()
+        return True
+    except OSError:
+        return False
+
+
 def _default_num_ctx() -> int:
     """Default context window (tokens). Override with ``JARVIS_NUM_CTX``.
 
@@ -180,6 +190,13 @@ class OllamaEngine(AsyncHTTPEngineMixin, InferenceEngine):
         if tools:
             payload["tools"] = tools
 
+        # Online/Offline hybrid routing for cloud models
+        if "-cloud" in model:
+            if not _is_online():
+                logger.info("Laptop is offline. Routing '%s' to local 'qwen3.5:4b'", model)
+                model = "qwen3.5:4b"
+                payload["model"] = "qwen3.5:4b"
+
         # Apply structured output / JSON mode
         response_format = kwargs.get("response_format")
         if response_format is not None:
@@ -196,15 +213,17 @@ class OllamaEngine(AsyncHTTPEngineMixin, InferenceEngine):
                 payload.pop("tools", None)
                 resp = self._client.post("/api/chat", json=payload)
             resp.raise_for_status()
-        except (httpx.ConnectError, httpx.TimeoutException) as exc:
-            raise EngineConnectionError(
-                f"Ollama not reachable at {self._host}"
-            ) from exc
-        except httpx.HTTPStatusError as exc:
-            body = exc.response.text[:500] if exc.response else ""
-            raise RuntimeError(
-                f"Ollama returned {exc.response.status_code}: {body}"
-            ) from exc
+        except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError) as exc:
+            if "-cloud" in model:
+                logger.warning("Cloud model '%s' failed (%s). Falling back to local 'qwen3.5:4b'", model, exc)
+                payload["model"] = "qwen3.5:4b"
+                resp = self._client.post("/api/chat", json=payload)
+                resp.raise_for_status()
+            elif isinstance(exc, (httpx.ConnectError, httpx.TimeoutException)):
+                raise EngineConnectionError(f"Ollama not reachable at {self._host}") from exc
+            else:
+                body = exc.response.text[:500] if exc.response else ""
+                raise RuntimeError(f"Ollama returned {exc.response.status_code}: {body}") from exc
         data = resp.json()
         # prompt_eval_count = tokens actually evaluated (KV-cache-aware).
         # estimate_prompt_tokens = full prompt size (for cost comparison).
@@ -305,6 +324,10 @@ class OllamaEngine(AsyncHTTPEngineMixin, InferenceEngine):
             # the single uvicorn worker on every inter-token wait, serializing all
             # concurrent chats and letting one wedged read freeze the whole API).
             # The shared client keeps pooled connections across turns.
+            if "-cloud" in payload.get("model", "") and not _is_online():
+                logger.info("Laptop is offline. Streaming via local 'qwen3.5:4b'")
+                payload["model"] = "qwen3.5:4b"
+
             client = self._get_async_client()
             async with client.stream("POST", "/api/chat", json=payload) as resp:
                 # ``not is_success`` covers 3xx as well as 4xx/5xx and maps
@@ -436,6 +459,12 @@ class OllamaEngine(AsyncHTTPEngineMixin, InferenceEngine):
                 # silent EMPTY stream rather than a clean engine error.
                 if not resp.is_success:
                     await resp.aread()
+                    if "-cloud" in payload.get("model", ""):
+                        logger.warning("Cloud model stream '%s' failed (HTTP %s). Falling back to local 'qwen3.5:4b'", payload["model"], resp.status_code)
+                        payload["model"] = "qwen3.5:4b"
+                        async for c in self._run_stream(payload, messages, retry_without_tools=retry_without_tools):
+                            yield c
+                        return
                     self._raise_stream_http_error(resp.status_code, resp.text)
 
                 finish_reason: str | None = None
