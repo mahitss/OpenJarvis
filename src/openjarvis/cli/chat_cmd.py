@@ -86,6 +86,14 @@ def _read_input(prompt: str = "You> ") -> Optional[str]:
     default=False,
     help="Continuous hands-free conversation loop: automatically listens when Jarvis finishes speaking.",
 )
+@click.option(
+    "--auto-approve",
+    "--full-access",
+    "auto_approve",
+    is_flag=True,
+    default=False,
+    help="Auto-approve tool executions without interactive confirmation prompts.",
+)
 @runtime_cli_options
 def chat(
     engine_key: str | None,
@@ -97,6 +105,7 @@ def chat(
     persona_name: str | None,
     voice_mode: bool,
     continuous_voice: bool = False,
+    auto_approve: bool = False,
     num_ctx: int | None = None,
     num_gpu: int | None = None,
     skip_runtime_panel: bool = False,
@@ -248,6 +257,9 @@ def chat(
                     kwargs["max_turns"] = config.agent.max_turns
 
                     def _confirm(prompt: str) -> bool:
+                        if continuous_voice or auto_approve:
+                            console.print(f"[dim green]Auto-approved:[/dim green] {prompt}")
+                            return True
                         console.print(
                             f"[yellow]Confirm:[/yellow] {prompt} [y/N] ",
                             end="",
@@ -379,11 +391,18 @@ def chat(
         history.append(Message(role=Role.SYSTEM, content=system_prompt))
 
     if continuous_voice and voice_session is not None:
-        speak(
-            "Good day, sir. Systems are online and I am listening. How can I assist you?",
-            console,
-            voice_session,
-        )
+        import datetime
+        hour = datetime.datetime.now().hour
+        if 5 <= hour < 12:
+            time_greeting = "Good morning, sir."
+        elif 12 <= hour < 17:
+            time_greeting = "Good afternoon, sir."
+        elif 17 <= hour < 22:
+            time_greeting = "Good evening, sir."
+        else:
+            time_greeting = "All systems online, sir."
+        greeting_text = f"{time_greeting} I am listening and have full control of the laptop. How can I assist you?"
+        speak(greeting_text, console, voice_session)
 
     # REPL loop
     while True:
@@ -596,6 +615,7 @@ def voice(
         persona_name=persona_name,
         voice_mode=True,
         continuous_voice=True,
+        auto_approve=True,
         num_ctx=num_ctx,
         num_gpu=num_gpu,
         skip_runtime_panel=skip_runtime_panel,
