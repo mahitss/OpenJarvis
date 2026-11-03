@@ -116,9 +116,15 @@ class FasterWhisperBackend(SpeechBackend):
                 with tmp:
                     tmp.write(audio)
 
-                kwargs = {}
+                kwargs = {
+                    "vad_filter": True,
+                    "vad_parameters": dict(min_silence_duration_ms=500),
+                    "condition_on_previous_text": False,
+                }
                 if language:
                     kwargs["language"] = language
+                else:
+                    kwargs["language"] = 'en'
 
                 segments_iter, info = model.transcribe(tmp.name, **kwargs)
                 segments_list = list(segments_iter)

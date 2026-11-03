@@ -70,6 +70,15 @@ def _is_control_token_only_args(raw_args: Any) -> bool:
     return saw_token
 
 
+_CLOUD_COOLDOWN_SECONDS = 60.0
+_cloud_failed_until: Dict[str, float] = {}
+
+
+def _mark_cloud_model_failed(model: str) -> None:
+    import time
+    _cloud_failed_until[model] = time.time() + _CLOUD_COOLDOWN_SECONDS
+
+
 def _is_online(timeout: float = 0.5) -> bool:
     """Check if internet connectivity is available."""
     import socket
@@ -78,6 +87,29 @@ def _is_online(timeout: float = 0.5) -> bool:
         return True
     except OSError:
         return False
+
+
+def _resolve_hybrid_model(model: str) -> str:
+    """If model is a cloud model, check internet connectivity and failure cooldown."""
+    if "-cloud" not in model:
+        return model
+
+    import time
+    until = _cloud_failed_until.get(model, 0.0)
+    now = time.time()
+    if now < until:
+        logger.info(
+            "Cloud model '%s' in cooldown (%.0fs left). Routing to local 'qwen3.5:4b'",
+            model,
+            until - now,
+        )
+        return "qwen3.5:4b"
+
+    if not _is_online():
+        logger.info("Laptop is offline. Routing cloud model '%s' to local 'qwen3.5:4b'", model)
+        return "qwen3.5:4b"
+
+    return model
 
 
 def _default_num_ctx() -> int:
@@ -168,6 +200,7 @@ class OllamaEngine(AsyncHTTPEngineMixin, InferenceEngine):
                         fn["arguments"] = json.loads(args)
                     except (json.JSONDecodeError, TypeError):
                         pass
+        model = _resolve_hybrid_model(model)
         payload: Dict[str, Any] = {
             "model": model,
             "messages": msg_dicts,
@@ -190,12 +223,12 @@ class OllamaEngine(AsyncHTTPEngineMixin, InferenceEngine):
         if tools:
             payload["tools"] = tools
 
-        # Online/Offline hybrid routing for cloud models
-        if "-cloud" in model:
-            if not _is_online():
-                logger.info("Laptop is offline. Routing '%s' to local 'qwen3.5:4b'", model)
-                model = "qwen3.5:4b"
-                payload["model"] = "qwen3.5:4b"
+        # Online/Offline hybrid routing with cooldown for cloud models
+        orig_model = model
+        resolved_model = _resolve_hybrid_model(model)
+        if resolved_model != model:
+            model = resolved_model
+            payload["model"] = resolved_model
 
         # Apply structured output / JSON mode
         response_format = kwargs.get("response_format")
@@ -214,8 +247,9 @@ class OllamaEngine(AsyncHTTPEngineMixin, InferenceEngine):
                 resp = self._client.post("/api/chat", json=payload)
             resp.raise_for_status()
         except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError) as exc:
-            if "-cloud" in model:
-                logger.warning("Cloud model '%s' failed (%s). Falling back to local 'qwen3.5:4b'", model, exc)
+            if "-cloud" in orig_model:
+                _mark_cloud_model_failed(orig_model)
+                logger.warning("Cloud model '%s' failed (%s). Cooldown set for 60s. Falling back to local 'qwen3.5:4b'", orig_model, exc)
                 payload["model"] = "qwen3.5:4b"
                 resp = self._client.post("/api/chat", json=payload)
                 resp.raise_for_status()
@@ -324,9 +358,8 @@ class OllamaEngine(AsyncHTTPEngineMixin, InferenceEngine):
             # the single uvicorn worker on every inter-token wait, serializing all
             # concurrent chats and letting one wedged read freeze the whole API).
             # The shared client keeps pooled connections across turns.
-            if "-cloud" in payload.get("model", "") and not _is_online():
-                logger.info("Laptop is offline. Streaming via local 'qwen3.5:4b'")
-                payload["model"] = "qwen3.5:4b"
+            model = _resolve_hybrid_model(payload.get("model", ""))
+            payload["model"] = model
 
             client = self._get_async_client()
             async with client.stream("POST", "/api/chat", json=payload) as resp:

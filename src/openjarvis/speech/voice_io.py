@@ -55,6 +55,7 @@ def record_until_silence(
 
     frames: list[bytes] = []
     silence_count = 0
+    consecutive_speech_chunks = 0
     has_speech = False
 
     with sd.RawInputStream(
@@ -70,18 +71,19 @@ def record_until_silence(
 
             amplitude = _rms(data)
             if amplitude > silence_threshold:
-                has_speech = True
-                silence_count = 0
+                consecutive_speech_chunks += 1
+                if consecutive_speech_chunks >= 2:
+                    has_speech = True
+                    silence_count = 0
             elif not has_speech and len(frames) >= startup_silence_chunks:
-                if return_empty_on_silence:
-                    return b""
-                break
+                return b""
             elif has_speech:
+                consecutive_speech_chunks = 0
                 silence_count += 1
                 if silence_count >= silence_chunks:
                     break
 
-    if return_empty_on_silence and not has_speech:
+    if not has_speech:
         return b""
 
     return _frames_to_wav(frames, sample_rate)

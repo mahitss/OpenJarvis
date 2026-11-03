@@ -196,6 +196,11 @@ def record_voice(
             audio_bytes, format="wav", language=active_session.get_stt_language()
         )
         text = result.text.strip()
+        # Filter out Whisper silence/noise hallucinations (e.g. non-English text when lang is 'en')
+        clean_ascii = any('a' <= ch.lower() <= 'z' or ch.isdigit() for ch in text)
+        if (active_session.get_stt_language() or "en") == "en" and not clean_ascii:
+            return None
+
         if text:
             console.print(f"[bold]You (voice):[/bold] {_terminal_safe_text(text)}")
             norm = text.lower().rstrip(".!?, ")
