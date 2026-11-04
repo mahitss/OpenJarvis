@@ -2094,8 +2094,11 @@ def load_config(path: Optional[Path] = None) -> JarvisConfig:
     cfg._config_path = config_path
     cfg._config_dir = config_path.parent
     if config_path.exists():
-        with open(config_path, "rb") as fh:
-            data = tomllib.load(fh)
+        raw_bytes = config_path.read_bytes()
+        # Transparently strip UTF-8 BOM if created on Windows
+        if raw_bytes.startswith(b"\xef\xbb\xbf"):
+            raw_bytes = raw_bytes[3:]
+        data = tomllib.loads(raw_bytes.decode("utf-8"))
 
         # Run backward-compat migrations before applying
         _migrate_toml_data(data, cfg)
