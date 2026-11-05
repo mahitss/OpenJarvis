@@ -194,7 +194,7 @@ def chat(
         raise click.UsageError(
             "--num-ctx and --num-gpu are supported only with --engine ollama"
         )
-    if engine_name == "ollama" and tty_wants_runtime_panel(skip_runtime_panel):
+    if engine_name == "ollama" and tty_wants_runtime_panel(skip_runtime_panel) and not voice_mode:
         runtime_opts = interactive_pick_runtime_options(
             console,
             engine_name=engine_name,
@@ -635,7 +635,7 @@ def voice(
         auto_approve=auto_approve,
         num_ctx=num_ctx,
         num_gpu=num_gpu,
-        skip_runtime_panel=skip_runtime_panel,
+        skip_runtime_panel=True,
     )
 
 

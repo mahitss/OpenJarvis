@@ -125,6 +125,8 @@ def run_voice_assistant() -> None:
         return
 
     print("[JARVIS] Launching Hands-Free Voice Assistant with Full Laptop Control...")
+    os.environ["JARVIS_SKIP_RUNTIME_PANEL"] = "1"
+    os.environ["JARVIS_SKIP_MODEL_PICK"] = "1"
     if sys.platform == "win32" and VOICE_BAT.exists():
         # Launch in a visible terminal window so user can see transcription and tool feedback
         subprocess.Popen(
@@ -133,7 +135,7 @@ def run_voice_assistant() -> None:
         )
     else:
         subprocess.run(
-            [str(VENV_JARVIS), "voice", "--full-access"],
+            [str(VENV_JARVIS), "voice", "--full-access", "--skip-runtime-panel"],
             cwd=str(BASE_DIR),
         )
 
