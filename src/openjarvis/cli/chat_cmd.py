@@ -391,6 +391,17 @@ def chat(
         history.append(Message(role=Role.SYSTEM, content=system_prompt))
 
     if continuous_voice and voice_session is not None:
+        # Pre-warm STT in a background thread while Kokoro speaks the greeting
+        import threading
+        def _warm_stt():
+            try:
+                stt = voice_session.get_stt_backend()
+                if stt is not None and hasattr(stt, "_ensure_model"):
+                    stt._ensure_model()
+            except Exception:
+                pass
+        threading.Thread(target=_warm_stt, daemon=True).start()
+
         import datetime
         hour = datetime.datetime.now().hour
         if 5 <= hour < 12:

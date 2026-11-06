@@ -140,15 +140,22 @@ def run_voice_assistant() -> None:
         )
 
 
+def _ensure_web_services() -> None:
+    ensure_backend()
+    ensure_frontend()
+    open_app_window()
+
+
 def main() -> None:
     print("=" * 60)
     print("       J.A.R.V.I.S. - Autonomous System & Voice Assistant")
     print("=" * 60)
     ensure_ollama()
-    ensure_backend()
-    ensure_frontend()
-    open_app_window()
+    # 1. Launch hands-free voice assistant immediately for instant interaction
     run_voice_assistant()
+    # 2. Spin up backend API server and frontend UI in parallel
+    import threading
+    threading.Thread(target=_ensure_web_services, daemon=True).start()
 
 
 if __name__ == "__main__":
